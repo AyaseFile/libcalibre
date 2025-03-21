@@ -1,6 +1,8 @@
 use diesel::prelude::*;
 
-use crate::entities::book::Book;
+use crate::entities::{
+    book::Book, language::Language, publisher::Publisher, rating::Rating, tag::Tag,
+};
 
 use super::schema::*;
 
@@ -32,6 +34,47 @@ pub struct Identifier {
     pub book: i32,
     pub type_: String,
     pub val: String,
+}
+
+#[derive(Identifiable, Associations, Queryable, Selectable, Insertable)]
+#[diesel(belongs_to(Book, foreign_key = book))]
+#[diesel(belongs_to(Publisher, foreign_key = publisher))]
+#[diesel(table_name = books_publishers_link)]
+pub struct BookPublisherLink {
+    pub id: i32,
+    pub book: i32,
+    pub publisher: i32,
+}
+
+#[derive(Identifiable, Associations, Queryable, Selectable, Insertable)]
+#[diesel(belongs_to(Book, foreign_key = book))]
+#[diesel(belongs_to(Tag, foreign_key = tag))]
+#[diesel(table_name = books_tags_link)]
+pub struct BookTagLink {
+    pub id: i32,
+    pub book: i32,
+    pub tag: i32,
+}
+
+#[derive(Identifiable, Associations, Queryable, Selectable, Insertable)]
+#[diesel(belongs_to(Book, foreign_key = book))]
+#[diesel(belongs_to(Language, foreign_key = lang_code))]
+#[diesel(table_name = books_languages_link)]
+pub struct BookLanguageLink {
+    pub id: i32,
+    pub book: i32,
+    pub lang_code: i32,
+    pub item_order: i32,
+}
+
+#[derive(Identifiable, Associations, Queryable, Selectable, Insertable)]
+#[diesel(belongs_to(Book, foreign_key = book))]
+#[diesel(belongs_to(Rating, foreign_key = rating))]
+#[diesel(table_name = books_ratings_link)]
+pub struct BookRatingLink {
+    pub id: i32,
+    pub book: i32,
+    pub rating: i32,
 }
 
 // #[derive(Queryable, Selectable)]
@@ -175,16 +218,6 @@ pub struct Identifier {
 // }
 
 // #[derive(Queryable, Selectable)]
-// #[diesel(table_name = books_languages_link)]
-// #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-// pub struct BookLanguageLink {
-//     pub id: i32,
-//     pub book: i32,
-//     pub lang_code: i32,
-//     pub item_order: i32,
-// }
-
-// #[derive(Queryable, Selectable)]
 // #[diesel(table_name = books_plugin_data)]
 // #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 // pub struct BookPluginData {
@@ -195,37 +228,10 @@ pub struct Identifier {
 // }
 
 // #[derive(Queryable, Selectable)]
-// #[diesel(table_name = books_publishers_link)]
-// #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-// pub struct BookPublisherLink {
-//     pub id: i32,
-//     pub book: i32,
-//     pub publisher: i32,
-// }
-
-// #[derive(Queryable, Selectable)]
-// #[diesel(table_name = books_ratings_link)]
-// #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-// pub struct BookRatingLink {
-//     pub id: i32,
-//     pub book: i32,
-//     pub rating: i32,
-// }
-
-// #[derive(Queryable, Selectable)]
 // #[diesel(table_name = books_series_link)]
 // #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 // pub struct BookSeriesLink {
 //     pub id: i32,
 //     pub book: i32,
 //     pub series: i32,
-// }
-
-// #[derive(Queryable, Selectable)]
-// #[diesel(table_name = books_tags_link)]
-// #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-// pub struct BookTagLink {
-//     pub id: i32,
-//     pub book: i32,
-//     pub tag: i32,
 // }

@@ -38,7 +38,7 @@ impl AuthorsHandler {
             .values(new_author)
             .returning(Author::as_returning())
             .get_result::<Author>(&mut *connection)
-            .map_err(|_| ())
+            .or(Err(()))
     }
 
     pub fn create_if_missing(&mut self, dto: NewAuthorDto) -> Result<Author, ()> {
@@ -57,7 +57,7 @@ impl AuthorsHandler {
             .select(Author::as_select())
             .get_result::<Author>(&mut *connection)
             .optional()
-            .map_err(|_| ())
+            .or(Err(()))
     }
 
     pub fn find_by_name(&mut self, search_name: &str) -> Result<Option<Author>, ()> {
@@ -69,7 +69,7 @@ impl AuthorsHandler {
             .select(Author::as_select())
             .get_result::<Author>(&mut *connection)
             .optional()
-            .map_err(|_| ())
+            .or(Err(()))
     }
 
     pub fn update(&mut self, author_id: i32, dto: UpdateAuthorDto) -> Result<Author, ()> {

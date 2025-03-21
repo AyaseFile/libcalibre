@@ -129,7 +129,10 @@ impl BooksHandler {
             .or(Err(()))
     }
 
-    pub fn upsert_book_identifier(&mut self, update: UpsertBookIdentifier) -> Result<i32, ()> {
+    pub fn upsert_book_identifier(
+        &mut self,
+        update: UpsertBookIdentifier,
+    ) -> Result<Identifier, ()> {
         match update.id {
             Some(update_id) => self.update_book_identifier(update, update_id),
             None => self.create_book_identifier(update),
@@ -140,20 +143,20 @@ impl BooksHandler {
         &mut self,
         update: UpsertBookIdentifier,
         identifier_id: i32,
-    ) -> Result<i32, ()> {
-        use crate::schema::identifiers::dsl::*;
+    ) -> Result<Identifier, ()> {
+        use crate::schema::identifiers::dsl::{id, identifiers, type_, val};
         let mut connection = self.client.lock().unwrap();
 
         diesel::update(identifiers)
             .filter(id.eq(identifier_id))
             .set((type_.eq(update.label), val.eq(update.value)))
-            .returning(id)
-            .get_result::<i32>(&mut *connection)
+            .returning(Identifier::as_returning())
+            .get_result::<Identifier>(&mut *connection)
             .or(Err(()))
     }
 
-    fn create_book_identifier(&mut self, update: UpsertBookIdentifier) -> Result<i32, ()> {
-        use crate::schema::identifiers::dsl::*;
+    fn create_book_identifier(&mut self, update: UpsertBookIdentifier) -> Result<Identifier, ()> {
+        use crate::schema::identifiers::dsl::{book, identifiers, type_, val};
         let mut connection = self.client.lock().unwrap();
         let lowercased_label = update.label.to_lowercase();
 
@@ -163,13 +166,13 @@ impl BooksHandler {
                 type_.eq(lowercased_label),
                 val.eq(update.value),
             ))
-            .returning(id)
-            .get_result::<i32>(&mut *connection)
+            .returning(Identifier::as_returning())
+            .get_result::<Identifier>(&mut *connection)
             .or(Err(()))
     }
 
     pub fn delete_book_identifier(&mut self, book_id: i32, identifier_id: i32) -> Result<(), ()> {
-        use crate::schema::identifiers::dsl::*;
+        use crate::schema::identifiers::dsl::{book, id, identifiers};
         let mut connection = self.client.lock().unwrap();
 
         diesel::delete(identifiers.filter(book.eq(book_id).and(id.eq(identifier_id))))
@@ -274,6 +277,116 @@ impl BooksHandler {
         .execute(&mut *connection)
         .map(|_| ())
         .or(Err(()))
+    }
+
+    // === === ===
+    // Publishers
+    // === === ===
+
+    pub fn link_publisher_to_book(&mut self, book_id: i32, publisher_id: i32) -> Result<(), ()> {
+        use crate::schema::books_publishers_link::dsl::{book, books_publishers_link, publisher};
+        let mut connection = self.client.lock().unwrap();
+
+        let _ = diesel::delete(books_publishers_link.filter(book.eq(book_id)))
+            .execute(&mut *connection);
+        diesel::insert_into(books_publishers_link)
+            .values((book.eq(book_id), publisher.eq(publisher_id)))
+            .execute(&mut *connection)
+            .map(|_| ())
+            .or(Err(()))
+    }
+
+    pub fn unlink_publisher_from_book(
+        &mut self,
+        book_id: i32,
+        publisher_id: i32,
+    ) -> Result<(), ()> {
+        use crate::schema::books_publishers_link::dsl::{book, books_publishers_link, publisher};
+        let mut connection = self.client.lock().unwrap();
+
+        diesel::delete(
+            books_publishers_link.filter(book.eq(book_id).and(publisher.eq(publisher_id))),
+        )
+        .execute(&mut *connection)
+        .map(|_| ())
+        .or(Err(()))
+    }
+
+    // === === ===
+    // Tags
+    // === === ===
+
+    pub fn link_tag_to_book(&mut self, book_id: i32, tag_id: i32) -> Result<(), ()> {
+        use crate::schema::books_tags_link::dsl::{book, books_tags_link, tag};
+        let mut connection = self.client.lock().unwrap();
+
+        diesel::insert_into(books_tags_link)
+            .values((book.eq(book_id), tag.eq(tag_id)))
+            .execute(&mut *connection)
+            .map(|_| ())
+            .or(Err(()))
+    }
+
+    pub fn unlink_tag_from_book(&mut self, book_id: i32, tag_id: i32) -> Result<(), ()> {
+        use crate::schema::books_tags_link::dsl::{book, books_tags_link, tag};
+        let mut connection = self.client.lock().unwrap();
+
+        diesel::delete(books_tags_link.filter(book.eq(book_id).and(tag.eq(tag_id))))
+            .execute(&mut *connection)
+            .map(|_| ())
+            .or(Err(()))
+    }
+
+    // === === ===
+    // Ratings
+    // === === ===
+
+    pub fn link_rating_to_book(&mut self, book_id: i32, rating_id: i32) -> Result<(), ()> {
+        use crate::schema::books_ratings_link::dsl::{book, books_ratings_link, rating};
+        let mut connection = self.client.lock().unwrap();
+
+        let _ =
+            diesel::delete(books_ratings_link.filter(book.eq(book_id))).execute(&mut *connection);
+        diesel::insert_into(books_ratings_link)
+            .values((book.eq(book_id), rating.eq(rating_id)))
+            .execute(&mut *connection)
+            .map(|_| ())
+            .or(Err(()))
+    }
+
+    pub fn unlink_rating_from_book(&mut self, book_id: i32, rating_id: i32) -> Result<(), ()> {
+        use crate::schema::books_ratings_link::dsl::{book, books_ratings_link, rating};
+        let mut connection = self.client.lock().unwrap();
+
+        diesel::delete(books_ratings_link.filter(book.eq(book_id).and(rating.eq(rating_id))))
+            .execute(&mut *connection)
+            .map(|_| ())
+            .or(Err(()))
+    }
+
+    // === === ===
+    // Languages
+    // === === ===
+
+    pub fn link_language_to_book(&mut self, book_id: i32, language_id: i32) -> Result<(), ()> {
+        use crate::schema::books_languages_link::dsl::{book, books_languages_link, lang_code};
+        let mut connection = self.client.lock().unwrap();
+
+        diesel::insert_into(books_languages_link)
+            .values((book.eq(book_id), lang_code.eq(language_id)))
+            .execute(&mut *connection)
+            .map(|_| ())
+            .or(Err(()))
+    }
+
+    pub fn unlink_language_from_book(&mut self, book_id: i32, language_id: i32) -> Result<(), ()> {
+        use crate::schema::books_languages_link::dsl::{book, books_languages_link, lang_code};
+        let mut connection = self.client.lock().unwrap();
+
+        diesel::delete(books_languages_link.filter(book.eq(book_id).and(lang_code.eq(language_id))))
+            .execute(&mut *connection)
+            .map(|_| ())
+            .or(Err(()))
     }
 }
 

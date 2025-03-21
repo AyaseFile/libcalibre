@@ -1,14 +1,24 @@
 use crate::cover_image::cover_image_data_from_path;
 use crate::dtos::author::UpdateAuthorDto;
 use crate::dtos::file::NewFileDto;
+use crate::dtos::language::NewLanguageDto;
 use crate::dtos::library::NewLibraryEntryDto;
 use crate::dtos::library::NewLibraryFileDto;
 use crate::dtos::library::UpdateLibraryEntryDto;
+use crate::dtos::publisher::NewPublisherDto;
+use crate::dtos::rating::NewRatingDto;
+use crate::dtos::tag::NewTagDto;
 use crate::entities::book_file::NewBookFile;
+use crate::entities::language::Language;
+use crate::entities::rating::Rating;
+use crate::entities::tag::Tag;
+use crate::util::canonicalize_lang;
 use crate::Book;
+use crate::Publisher;
 use crate::UpsertBookIdentifier;
 use chrono::DateTime;
 use chrono::Utc;
+use deunicode::deunicode;
 use sanitise_file_name::sanitise;
 
 use crate::BookFile;
@@ -63,13 +73,24 @@ impl CalibreClient {
     ) -> Result<crate::BookWithAuthorsAndFiles, Box<dyn std::error::Error>> {
         // 1. Create Authors & Book, then link them.
         // ======================================
-        let created_author_list = self.create_authors(dto.authors)?;
+        let authors = dto
+            .authors
+            .into_iter()
+            .map(|mut author| {
+                if author.sortable_name.is_empty() {
+                    author.sortable_name = Author::sort_author_name_apa(&author.full_name);
+                }
+                author
+            })
+            .collect::<Vec<NewAuthorDto>>();
+        let author_list = self.create_authors(authors)?;
         let creatable_book = NewBook::try_from(dto.book.clone()).unwrap();
-        let book = self.client_v2.books().create(creatable_book).unwrap();
+        let book_id = self.client_v2.books().create(creatable_book).unwrap().id;
+        let book = self.client_v2.books().find_by_id(book_id).unwrap().unwrap(); // why use trigger?
         let _ = self.client_v2.books().update(
             book.id,
             UpdateBookData {
-                author_sort: Some(combined_author_sort(&created_author_list)),
+                author_sort: Some(combined_author_sort(&author_list)),
                 title: None,
                 timestamp: None,
                 pubdate: None,
@@ -79,7 +100,7 @@ impl CalibreClient {
                 has_cover: None,
             },
         );
-        for author in &created_author_list {
+        for author in &author_list {
             let _ = self
                 .client_v2
                 .books()
@@ -88,7 +109,7 @@ impl CalibreClient {
 
         // 2. Create directories for author & book
         // ======================================
-        let primary_author = &created_author_list[0];
+        let primary_author = &author_list[0].clone();
         let author_dir_name = self.client_v2.authors().name_author_dir(primary_author);
 
         let book_dir_name = gen_book_folder_name(&dto.book.title, book.id);
@@ -104,7 +125,76 @@ impl CalibreClient {
             .books()
             .update(book.id, update_book_data_for_path(&book_dir_relative_path));
 
-        // 3. Copy Book files & cover image to library
+        // 3. Create metadata, then link them.
+        // ======================================
+        let publisher = if let Some(publisher) = dto.publisher {
+            let publisher = self.create_publisher(publisher)?;
+            let _ = self
+                .client_v2
+                .books()
+                .link_publisher_to_book(book.id, publisher.id);
+            Some(publisher)
+        } else {
+            None
+        };
+
+        let identifiers = dto
+            .identifiers
+            .into_iter()
+            .map(|i| UpsertBookIdentifier {
+                book_id: book.id,
+                id: i.id,
+                label: i.label,
+                value: i.value,
+            })
+            .collect::<Vec<UpsertBookIdentifier>>();
+        let identifiers = self.upsert_book_identifiers(identifiers)?;
+
+        let language = if let Some(language_input) = dto.language {
+            if let Some(canonical_lang) = canonicalize_lang(&language_input.lang_code) {
+                let language = self.create_language(NewLanguageDto {
+                    lang_code: canonical_lang.to_639_3().to_string(),
+                })?;
+
+                let _ = self
+                    .client_v2
+                    .books()
+                    .link_language_to_book(book.id, language.id);
+
+                Some(language)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let tags = self.create_tags(dto.tags)?;
+        for tag in tags.iter() {
+            let _ = self.client_v2.books().link_tag_to_book(book.id, tag.id);
+        }
+
+        let rating = if let Some(rating) = dto.rating {
+            let rating = self.create_rating(rating)?;
+            let _ = self
+                .client_v2
+                .books()
+                .link_rating_to_book(book.id, rating.id);
+            Some(rating)
+        } else {
+            None
+        };
+
+        let metadata = Metadata {
+            author_list: &author_list,
+            publisher: publisher.as_ref(),
+            identifiers: &identifiers,
+            language: language.as_ref(),
+            tags: &tags,
+            rating: rating.as_ref(),
+        };
+
+        // 4. Copy Book files & cover image to library
         // ===========================
         let mut created_files: Vec<BookFile> = Vec::new();
         if let Some(files) = dto.files {
@@ -142,9 +232,9 @@ impl CalibreClient {
             }
         }
 
-        // 4. Create Calibre metadata file
+        // 5. Create Calibre metadata file
         // ===============================
-        let metadata_opf = MetadataOpf::new(&book, &created_author_list, Utc::now()).format();
+        let metadata_opf = MetadataOpf::new(&book, &metadata, Utc::now()).format();
         match metadata_opf {
             Ok(contents) => {
                 let metadata_opf_path = Path::new(&book_dir_relative_path).join("metadata.opf");
@@ -159,7 +249,7 @@ impl CalibreClient {
 
         Ok(BookWithAuthorsAndFiles {
             book,
-            authors: created_author_list,
+            authors: author_list,
             files: created_files,
             book_description_html: None,
             is_read: false,
@@ -352,8 +442,16 @@ impl CalibreClient {
 
     // === Identifiers ===
 
-    pub fn upsert_book_identifier(&mut self, update: UpsertBookIdentifier) -> Result<i32, ()> {
-        self.client_v2.books().upsert_book_identifier(update)
+    pub fn upsert_book_identifiers(
+        &mut self,
+        update: Vec<UpsertBookIdentifier>,
+    ) -> Result<Vec<Identifier>, Box<dyn Error>> {
+        let x = update
+            .into_iter()
+            .map(|dto| self.client_v2.books().upsert_book_identifier(dto).unwrap())
+            .collect::<Vec<Identifier>>();
+
+        Ok(x)
     }
 
     pub fn delete_book_identifier(&mut self, book_id: i32, identifier_id: i32) -> Result<(), ()> {
@@ -374,6 +472,38 @@ impl CalibreClient {
                 .expect("Failed to set new UUID");
         })
         .map_err(|_| CalibreError::DatabaseError)
+    }
+
+    // === Publishers ===
+
+    fn create_publisher(
+        &mut self,
+        dto: NewPublisherDto,
+    ) -> Result<crate::Publisher, Box<dyn Error>> {
+        Ok(self.client_v2.publishers().create_if_missing(dto).unwrap())
+    }
+
+    // === Languages ===
+
+    fn create_language(&mut self, dto: NewLanguageDto) -> Result<Language, Box<dyn Error>> {
+        Ok(self.client_v2.languages().create_if_missing(dto).unwrap())
+    }
+
+    // === Tags ===
+
+    fn create_tags(&mut self, tags: Vec<NewTagDto>) -> Result<Vec<Tag>, Box<dyn Error>> {
+        let x = tags
+            .into_iter()
+            .map(|dto| self.client_v2.tags().create_if_missing(dto).unwrap())
+            .collect::<Vec<Tag>>();
+
+        Ok(x)
+    }
+
+    // === Ratings ===
+
+    fn create_rating(&mut self, rating: NewRatingDto) -> Result<Rating, Box<dyn Error>> {
+        Ok(self.client_v2.ratings().create_if_missing(rating).unwrap())
     }
 }
 
@@ -400,32 +530,42 @@ fn update_book_data_for_path(path: &PathBuf) -> UpdateBookData {
 }
 
 fn gen_book_file_name(book_title: &String, author_name: &String) -> String {
-    sanitise(
+    sanitise(&deunicode(
         &"{title} - {author}"
             .replace("{title}", book_title)
             .replace("{author}", author_name),
-    )
+    ))
 }
 
 fn gen_book_folder_name(book_name: &String, book_id: i32) -> String {
-    sanitise(
+    sanitise(&deunicode(
         &"{title} ({id})"
             .replace("{title}", book_name)
             .replace("{id}", &book_id.to_string()),
-    )
+    ))
+}
+
+#[derive(Default)]
+struct Metadata<'a> {
+    author_list: &'a [Author],
+    publisher: Option<&'a Publisher>,
+    identifiers: &'a [Identifier],
+    language: Option<&'a Language>,
+    tags: &'a [Tag],
+    rating: Option<&'a Rating>,
 }
 
 struct MetadataOpf<'a> {
     book: &'a Book,
-    author_list: &'a Vec<Author>,
+    metadata: &'a Metadata<'a>,
     now: DateTime<Utc>,
 }
 
 impl<'a> MetadataOpf<'a> {
-    pub fn new(book: &'a Book, author_list: &'a Vec<Author>, now: DateTime<Utc>) -> Self {
+    pub fn new(book: &'a Book, metadata: &'a Metadata, now: DateTime<Utc>) -> Self {
         Self {
             book,
-            author_list,
+            metadata,
             now,
         }
     }
@@ -435,15 +575,35 @@ impl<'a> MetadataOpf<'a> {
             .book
             .author_sort
             .clone()
-            .unwrap_or_else(|| self.get_author_sort_string(&self.author_list));
+            .unwrap_or_else(|| self.get_author_sort_string(self.metadata.author_list));
 
-        let tags_string = self.get_tags_string(Vec::new());
-        let authors_string = self.get_authors_string(&self.author_list, &book_custom_author_sort);
+        let authors_string =
+            self.get_authors_string(self.metadata.author_list, &book_custom_author_sort);
+        let publisher_string = self.get_publisher_string(self.metadata.publisher);
+        let identifiers_string = self.get_identifiers_string(self.metadata.identifiers);
+        let language_string = self.get_language_string(self.metadata.language);
+        let tags_string = self.get_tags_string(self.metadata.tags);
+        let link_map_string = self.get_link_map_string(self.metadata.author_list);
+        let rating_string = self.get_rating_string(self.metadata.rating);
 
-        Ok(self.format_metadata_opf(&self.book, &authors_string, &tags_string, &self.now))
+        Ok(self.format_metadata_opf(
+            self.book,
+            &authors_string,
+            &publisher_string,
+            &identifiers_string,
+            &language_string,
+            &tags_string,
+            &link_map_string,
+            &rating_string,
+            &self.now,
+        ))
     }
 
-    fn get_author_sort_string(&self, author_list: &Vec<Author>) -> String {
+    fn get_author_sort_string(&self, author_list: &[Author]) -> String {
+        if author_list.is_empty() {
+            return String::new();
+        }
+
         author_list
             .iter()
             .map(|author| author.name.clone())
@@ -451,17 +611,15 @@ impl<'a> MetadataOpf<'a> {
             .join(", ")
     }
 
-    fn get_tags_string(&self, tags: Vec<String>) -> String {
-        tags.iter()
-            .map(|tag| format!("<dc:subject>{}</dc:subject>", tag))
-            .collect::<String>()
-    }
-
     fn get_authors_string(
         &self,
-        author_list: &Vec<Author>,
+        author_list: &[Author],
         book_custom_author_sort: &String,
     ) -> String {
+        if author_list.is_empty() {
+            return String::new();
+        }
+
         author_list
             .iter()
             .map(|author| {
@@ -474,46 +632,148 @@ impl<'a> MetadataOpf<'a> {
             .collect::<String>()
     }
 
+    fn get_publisher_string(&self, publisher: Option<&Publisher>) -> String {
+        match publisher {
+            Some(p) => format!("<dc:publisher>{}</dc:publisher>", p.name),
+            None => String::new(),
+        }
+    }
+
+    fn get_identifiers_string(&self, identifiers: &[Identifier]) -> String {
+        if identifiers.is_empty() {
+            return String::new();
+        }
+
+        identifiers
+            .iter()
+            .map(|identifier| {
+                format!(
+                    "<dc:identifier opf:scheme=\"{}\">{}</dc:identifier>",
+                    identifier.type_, identifier.val
+                )
+            })
+            .collect::<String>()
+    }
+
+    fn get_language_string(&self, language: Option<&Language>) -> String {
+        match language {
+            Some(lang) => format!("<dc:language>{}</dc:language>", lang.lang_code),
+            None => String::new(),
+        }
+    }
+
+    fn get_tags_string(&self, tags: &[Tag]) -> String {
+        const INDENT: usize = 8;
+
+        if tags.is_empty() {
+            return String::new();
+        }
+
+        tags.iter()
+            .map(|tag| {
+                format!(
+                    "{}<dc:subject>{}</dc:subject>",
+                    " ".repeat(INDENT),
+                    tag.name
+                )
+            })
+            .collect::<Vec<String>>()
+            .join("\n")
+    }
+
+    fn get_link_map_string(&self, author_list: &[Author]) -> String {
+        if author_list.is_empty() {
+            return String::new();
+        }
+
+        let mut authors_map = std::collections::HashMap::new();
+
+        for author in author_list {
+            authors_map.insert(author.name.clone(), author.link.clone());
+        }
+
+        let mut link_maps = std::collections::HashMap::new();
+        link_maps.insert("authors".to_string(), authors_map);
+
+        let json_string = serde_json::to_string(&link_maps).unwrap_or_default();
+        let formatted_json = json_string.replace("\":", "\": ");
+        let escaped_content = formatted_json.replace("\"", "&quot;");
+
+        format!(
+            "<meta name=\"calibre:link_maps\" content=\"{}\"/>",
+            escaped_content
+        )
+    }
+
+    fn get_rating_string(&self, rating: Option<&Rating>) -> String {
+        match rating {
+            Some(r) => format!("<meta name=\"calibre:rating\" content=\"{}\"/>", r.rating),
+            None => String::new(),
+        }
+    }
+
     fn format_metadata_opf(
         &self,
         book: &Book,
         authors_string: &String,
+        publisher_string: &String,
+        identifiers_string: &String,
+        language_string: &String,
         tags_string: &String,
+        link_map_string: &String,
+        rating_string: &String,
         now: &DateTime<Utc>,
     ) -> String {
-        format!(
+        let raw_xml = format!(
             r#"<?xml version='1.0' encoding='utf-8'?>
-        <package xmlns="http://www.idpf.org/2007/opf" unique-identifier="uuid_id" version="2.0">
-          <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
-            <dc:identifier opf:scheme="calibre" id="calibre_id">{calibre_id}</dc:identifier>
-            <dc:identifier opf:scheme="uuid" id="uuid_id">{calibre_uuid}</dc:identifier>
-            <dc:title>{book_title}</dc:title>
-            {authors}
-            <dc:contributor opf:file-as="calibre" opf:role="bkp">citadel (1.0.0) [https://github.com/every-day-things/citadel]</dc:contributor>
-            <dc:date>{pub_date}</dc:date>
-            <dc:language>{language_iso_639_2}</dc:language>
-            {tags}
-            <meta name="calibre:timestamp" content="{now}"/>
-            <meta name="calibre:title_sort" content="{book_title_sortable}"/>
-          </metadata>
-          <guide>
-            <reference type="cover" title="Cover" href="cover.jpg"/>
-          </guide>
-        </package>"#,
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="uuid_id" version="2.0">
+    <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+        <dc:identifier opf:scheme="calibre" id="calibre_id">{calibre_id}</dc:identifier>
+        <dc:identifier opf:scheme="uuid" id="uuid_id">{calibre_uuid}</dc:identifier>
+        <dc:title>{book_title}</dc:title>
+        {authors}
+        {publisher}
+        {identifiers}
+        <dc:contributor opf:file-as="calibre" opf:role="bkp">citadel (1.0.0) [https://github.com/every-day-things/citadel]</dc:contributor>
+        <dc:date>{pub_date}</dc:date>
+        {language_iso_639_3}
+{tags}
+        {link_map}
+        {rating}
+        <meta name="calibre:timestamp" content="{now}"/>
+        <meta name="calibre:title_sort" content="{book_title_sortable}"/>
+    </metadata>
+    <guide>
+        <reference type="cover" title="Cover" href="cover.jpg"/>
+    </guide>
+</package>"#,
             calibre_id = book.id,
             calibre_uuid = &book.uuid.clone().unwrap_or("".to_string()).as_str(),
             book_title = book.title,
             authors = authors_string,
+            publisher = publisher_string,
+            identifiers = identifiers_string,
             pub_date = book
                 .pubdate
                 .unwrap_or(DateTime::from_timestamp_millis(0).unwrap().naive_utc())
                 .to_string()
                 .as_str(),
-            language_iso_639_2 = "en",
+            language_iso_639_3 = language_string,
             tags = tags_string,
+            link_map = link_map_string,
+            rating = rating_string,
             now = now.to_string(),
             book_title_sortable = &book.sort.clone().unwrap_or("".to_string()).as_str()
-        )
+        );
+        raw_xml
+            .lines()
+            .filter(|line| {
+                !line.trim().is_empty()
+                    || line.trim().starts_with("<")
+                    || line.trim().ends_with(">")
+            })
+            .collect::<Vec<&str>>()
+            .join("\n")
     }
 }
 

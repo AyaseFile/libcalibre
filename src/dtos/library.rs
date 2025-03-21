@@ -1,7 +1,13 @@
-use crate::dtos::author::NewAuthorDto;
+use crate::{dtos::author::NewAuthorDto, UpsertBookIdentifier};
 use std::path::PathBuf;
 
-use super::book::{NewBookDto, UpdateBookDto};
+use super::{
+    book::{NewBookDto, UpdateBookDto},
+    language::NewLanguageDto,
+    publisher::NewPublisherDto,
+    rating::NewRatingDto,
+    tag::NewTagDto,
+};
 
 pub struct NewLibraryFileDto {
     pub path: PathBuf,
@@ -18,5 +24,10 @@ pub struct UpdateLibraryEntryDto {
 pub struct NewLibraryEntryDto {
     pub book: NewBookDto,
     pub authors: Vec<NewAuthorDto>,
+    pub publisher: Option<NewPublisherDto>,
+    pub identifiers: Vec<UpsertBookIdentifier>,
+    pub language: Option<NewLanguageDto>,
+    pub tags: Vec<NewTagDto>,
+    pub rating: Option<NewRatingDto>,
     pub files: Option<Vec<NewLibraryFileDto>>,
 }

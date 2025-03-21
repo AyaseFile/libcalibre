@@ -15,7 +15,8 @@ use std::sync::{Arc, Mutex};
 
 pub use entities::{
     author::Author, book::Book, book::UpsertBookIdentifier,
-    book_aggregate::BookWithAuthorsAndFiles, book_file::BookFile,
+    book_aggregate::BookWithAuthorsAndFiles, book_file::BookFile, language::Language,
+    publisher::Publisher, rating::Rating, tag::Tag,
 };
 
 pub struct ClientV2 {
