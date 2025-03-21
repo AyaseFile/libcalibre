@@ -125,11 +125,19 @@ impl CalibreClient {
                 let cover_data = cover_image_data_from_path(primary_file.path.as_path())?;
                 if let Some(cover_data) = cover_data {
                     let cover_path = Path::new(&book_dir_relative_path).join("cover.jpg");
-                    let _ = library_relative_write_file(
+                    if library_relative_write_file(
                         &self.validated_library_path,
                         &cover_path,
                         &cover_data,
-                    );
+                    )
+                    .is_ok()
+                    {
+                        let update = UpdateBookData {
+                            has_cover: Some(true),
+                            ..Default::default()
+                        };
+                        let _ = self.client_v2.books().update(book.id, update);
+                    }
                 }
             }
         }
