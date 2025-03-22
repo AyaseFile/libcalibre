@@ -287,8 +287,6 @@ impl BooksHandler {
         use crate::schema::books_publishers_link::dsl::{book, books_publishers_link, publisher};
         let mut connection = self.client.lock().unwrap();
 
-        let _ = diesel::delete(books_publishers_link.filter(book.eq(book_id)))
-            .execute(&mut *connection);
         diesel::insert_into(books_publishers_link)
             .values((book.eq(book_id), publisher.eq(publisher_id)))
             .execute(&mut *connection)
