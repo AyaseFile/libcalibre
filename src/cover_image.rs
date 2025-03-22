@@ -25,6 +25,20 @@ pub fn cover_image_data_from_path(path: &Path) -> Result<Option<Vec<u8>>, Box<dy
                 }
             }
         }
+        Some(MIMETYPE::CBZ) => {
+            let parent = path.parent().unwrap_or(Path::new(""));
+            let cover_data = ["cover.jpg", "cover.jpeg", "cover.png"]
+                .iter()
+                .find_map(|name| {
+                    let potential_cover = parent.join(name);
+                    potential_cover
+                        .exists()
+                        .then(|| std::fs::read(&potential_cover).ok())
+                        .flatten()
+                });
+
+            Ok(cover_data)
+        }
         _ => Ok(None),
     }
 }

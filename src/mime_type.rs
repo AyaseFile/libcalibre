@@ -5,6 +5,7 @@ pub enum MIMETYPE {
     KF7, // Kindle Format 7 — AZW files
     KF8, // Kindle Format 8 — AZW3 files
     TXT,
+    CBZ,
     UNKNOWN,
 }
 
@@ -18,6 +19,7 @@ impl MIMETYPE {
             MIMETYPE::KF7 => "application/vnd.amazon.ebook",
             MIMETYPE::KF8 => "application/vnd.amazon.ebook-kf8", // Not a real MIME type, Amazon hasn't registered it
             MIMETYPE::TXT => "text/plain",
+            MIMETYPE::CBZ => "application/vnd.comicbook+zip",
             MIMETYPE::UNKNOWN => "application/octet-stream",
         }
     }
@@ -31,6 +33,7 @@ impl MIMETYPE {
             "application/pdf" => Some(MIMETYPE::PDF),
             "application/octet-stream" => Some(MIMETYPE::UNKNOWN),
             "text/plain" => Some(MIMETYPE::TXT),
+            "application/vnd.comicbook+zip" => Some(MIMETYPE::CBZ),
             _ => None,
         }
     }
@@ -43,6 +46,7 @@ impl MIMETYPE {
             MIMETYPE::KF7 => "azw",
             MIMETYPE::KF8 => "azw3",
             MIMETYPE::TXT => "txt",
+            MIMETYPE::CBZ => "cbz",
             MIMETYPE::UNKNOWN => "",
         }
     }
@@ -55,6 +59,7 @@ impl MIMETYPE {
             "azw" => Some(MIMETYPE::KF7),
             "azw3" => Some(MIMETYPE::KF8),
             "txt" => Some(MIMETYPE::TXT),
+            "cbz" => Some(MIMETYPE::CBZ),
             _ => None,
         }
     }
@@ -70,6 +75,7 @@ impl PartialEq for MIMETYPE {
                 | (MIMETYPE::KF7, MIMETYPE::KF7)
                 | (MIMETYPE::KF8, MIMETYPE::KF8)
                 | (MIMETYPE::TXT, MIMETYPE::TXT)
+                | (MIMETYPE::CBZ, MIMETYPE::CBZ)
                 | (MIMETYPE::UNKNOWN, MIMETYPE::UNKNOWN)
         )
     }
