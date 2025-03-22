@@ -127,16 +127,13 @@ impl CalibreClient {
 
         // 3. Create metadata, then link them.
         // ======================================
-        let publisher = if let Some(publisher) = dto.publisher {
-            let publisher = self.create_publisher(publisher)?;
+        let publishers = self.create_publishers(dto.publishers)?;
+        for publisher in publishers.iter() {
             let _ = self
                 .client_v2
                 .books()
                 .link_publisher_to_book(book.id, publisher.id);
-            Some(publisher)
-        } else {
-            None
-        };
+        }
 
         let identifiers = dto
             .identifiers
@@ -187,7 +184,7 @@ impl CalibreClient {
 
         let metadata = Metadata {
             author_list: &author_list,
-            publisher: publisher.as_ref(),
+            publisher: &publishers,
             identifiers: &identifiers,
             language: language.as_ref(),
             tags: &tags,
@@ -476,11 +473,16 @@ impl CalibreClient {
 
     // === Publishers ===
 
-    fn create_publisher(
+    fn create_publishers(
         &mut self,
-        dto: NewPublisherDto,
-    ) -> Result<crate::Publisher, Box<dyn Error>> {
-        Ok(self.client_v2.publishers().create_if_missing(dto).unwrap())
+        dto: Vec<NewPublisherDto>,
+    ) -> Result<Vec<Publisher>, Box<dyn Error>> {
+        let x = dto
+            .into_iter()
+            .map(|dto| self.client_v2.publishers().create_if_missing(dto).unwrap())
+            .collect::<Vec<Publisher>>();
+
+        Ok(x)
     }
 
     // === Languages ===
@@ -548,7 +550,7 @@ fn gen_book_folder_name(book_name: &String, book_id: i32) -> String {
 #[derive(Default)]
 struct Metadata<'a> {
     author_list: &'a [Author],
-    publisher: Option<&'a Publisher>,
+    publisher: &'a [Publisher],
     identifiers: &'a [Identifier],
     language: Option<&'a Language>,
     tags: &'a [Tag],
@@ -632,11 +634,18 @@ impl<'a> MetadataOpf<'a> {
             .collect::<String>()
     }
 
-    fn get_publisher_string(&self, publisher: Option<&Publisher>) -> String {
-        match publisher {
-            Some(p) => format!("<dc:publisher>{}</dc:publisher>", p.name),
-            None => String::new(),
+    fn get_publisher_string(&self, publisher: &[Publisher]) -> String {
+        if publisher.is_empty() {
+            return String::new();
         }
+
+        let combined_publishers = publisher
+            .iter()
+            .map(|publ| publ.name.clone())
+            .collect::<Vec<String>>()
+            .join("&amp;");
+
+        format!("<dc:publisher>{}</dc:publisher>", combined_publishers)
     }
 
     fn get_identifiers_string(&self, identifiers: &[Identifier]) -> String {

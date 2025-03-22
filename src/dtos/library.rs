@@ -24,7 +24,7 @@ pub struct UpdateLibraryEntryDto {
 pub struct NewLibraryEntryDto {
     pub book: NewBookDto,
     pub authors: Vec<NewAuthorDto>,
-    pub publisher: Option<NewPublisherDto>,
+    pub publishers: Vec<NewPublisherDto>,
     pub identifiers: Vec<UpsertBookIdentifier>,
     pub language: Option<NewLanguageDto>,
     pub tags: Vec<NewTagDto>,
