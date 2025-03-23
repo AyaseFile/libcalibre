@@ -1,12 +1,12 @@
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc};
 
 use crate::entities::book::{NewBook, UpdateBookData};
 
 #[derive(Clone)]
 pub struct NewBookDto {
     pub title: String,
-    pub timestamp: Option<NaiveDateTime>,
-    pub pubdate: Option<NaiveDateTime>,
+    pub timestamp: Option<DateTime<Utc>>,
+    pub pubdate: Option<DateTime<Utc>>,
     pub series_index: f32,
     pub flags: i32,
     pub has_cover: Option<bool>,
@@ -15,13 +15,14 @@ pub struct NewBookDto {
 pub struct UpdateBookDto {
     pub author_sort: Option<String>,
     pub title: Option<String>,
-    pub timestamp: Option<NaiveDateTime>,
-    pub pubdate: Option<NaiveDateTime>,
+    pub timestamp: Option<DateTime<Utc>>,
+    pub pubdate: Option<DateTime<Utc>>,
     pub series_index: Option<f32>,
     pub path: Option<String>,
     pub flags: Option<i32>,
     pub has_cover: Option<bool>,
     pub is_read: Option<bool>,
+    pub last_modified: Option<DateTime<Utc>>,
 }
 
 impl UpdateBookDto {
@@ -36,6 +37,7 @@ impl UpdateBookDto {
             flags: None,
             has_cover: None,
             is_read: None,
+            last_modified: None,
         }
     }
 }
@@ -68,6 +70,7 @@ impl TryFrom<UpdateBookDto> for UpdateBookData {
             path: dto.path,
             flags: dto.flags,
             has_cover: dto.has_cover,
+            last_modified: dto.last_modified,
         })
     }
 }

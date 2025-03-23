@@ -86,25 +86,26 @@ impl CalibreClient {
         let author_list = self.create_authors(authors)?;
         let creatable_book = NewBook::try_from(dto.book.clone()).unwrap();
         let book_id = self.client_v2.books().create(creatable_book).unwrap().id;
-        let book = self.client_v2.books().find_by_id(book_id).unwrap().unwrap(); // why use trigger?
+        let timestamp = Utc::now();
         let _ = self.client_v2.books().update(
-            book.id,
+            book_id,
             UpdateBookData {
                 author_sort: Some(combined_author_sort(&author_list)),
                 title: None,
-                timestamp: None,
-                pubdate: None,
+                timestamp: Some(timestamp),
+                pubdate: Some(default_pubdate()),
                 series_index: None,
                 path: None,
                 flags: None,
                 has_cover: None,
+                last_modified: None,
             },
         );
         for author in &author_list {
             let _ = self
                 .client_v2
                 .books()
-                .link_author_to_book(book.id, author.id);
+                .link_author_to_book(book_id, author.id);
         }
 
         // 2. Create directories for author & book
@@ -112,7 +113,7 @@ impl CalibreClient {
         let primary_author = &author_list[0].clone();
         let author_dir_name = self.client_v2.authors().name_author_dir(primary_author);
 
-        let book_dir_name = gen_book_folder_name(&dto.book.title, book.id);
+        let book_dir_name = gen_book_folder_name(&dto.book.title, book_id);
         let book_dir_relative_path = Path::new(&author_dir_name).join(&book_dir_name);
         library_relative_mkdir(
             &self.validated_library_path,
@@ -123,7 +124,7 @@ impl CalibreClient {
         let _ = self
             .client_v2
             .books()
-            .update(book.id, update_book_data_for_path(&book_dir_relative_path));
+            .update(book_id, update_book_data_for_path(&book_dir_relative_path));
 
         // 3. Create metadata, then link them.
         // ======================================
@@ -132,14 +133,14 @@ impl CalibreClient {
             let _ = self
                 .client_v2
                 .books()
-                .link_publisher_to_book(book.id, publisher.id);
+                .link_publisher_to_book(book_id, publisher.id);
         }
 
         let identifiers = dto
             .identifiers
             .into_iter()
             .map(|i| UpsertBookIdentifier {
-                book_id: book.id,
+                book_id,
                 id: i.id,
                 label: i.label,
                 value: i.value,
@@ -156,7 +157,7 @@ impl CalibreClient {
                 let _ = self
                     .client_v2
                     .books()
-                    .link_language_to_book(book.id, language.id);
+                    .link_language_to_book(book_id, language.id);
 
                 Some(language)
             } else {
@@ -168,7 +169,7 @@ impl CalibreClient {
 
         let tags = self.create_tags(dto.tags)?;
         for tag in tags.iter() {
-            let _ = self.client_v2.books().link_tag_to_book(book.id, tag.id);
+            let _ = self.client_v2.books().link_tag_to_book(book_id, tag.id);
         }
 
         let rating = if let Some(rating) = dto.rating {
@@ -176,7 +177,7 @@ impl CalibreClient {
             let _ = self
                 .client_v2
                 .books()
-                .link_rating_to_book(book.id, rating.id);
+                .link_rating_to_book(book_id, rating.id);
             Some(rating)
         } else {
             None
@@ -199,7 +200,7 @@ impl CalibreClient {
             let result = self.add_book_files(
                 &files,
                 &dto.book.title,
-                book.id,
+                book_id,
                 &primary_author.name,
                 book_dir_relative_path.clone(),
             );
@@ -223,15 +224,27 @@ impl CalibreClient {
                             has_cover: Some(true),
                             ..Default::default()
                         };
-                        let _ = self.client_v2.books().update(book.id, update);
+                        let _ = self.client_v2.books().update(book_id, update);
                     }
                 }
             }
         }
 
+        let book = self
+            .client_v2
+            .books()
+            .update(
+                book_id,
+                UpdateBookData {
+                    last_modified: Some(Utc::now()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
         // 5. Create Calibre metadata file
         // ===============================
-        let metadata_opf = MetadataOpf::new(&book, &metadata, Utc::now()).format();
+        let metadata_opf = MetadataOpf::new(&book, &metadata).format();
         match metadata_opf {
             Ok(contents) => {
                 let metadata_opf_path = Path::new(&book_dir_relative_path).join("metadata.opf");
@@ -517,6 +530,12 @@ fn combined_author_sort(author_list: &Vec<Author>) -> String {
         .join(" & ")
 }
 
+fn default_pubdate() -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339("0101-01-01T00:00:00+00:00")
+        .unwrap()
+        .with_timezone(&Utc)
+}
+
 fn update_book_data_for_path(path: &PathBuf) -> UpdateBookData {
     let path_as_string = path.to_str().unwrap().to_string();
     UpdateBookData {
@@ -528,6 +547,7 @@ fn update_book_data_for_path(path: &PathBuf) -> UpdateBookData {
         path: Some(path_as_string),
         flags: None,
         has_cover: None,
+        last_modified: None,
     }
 }
 
@@ -560,16 +580,11 @@ struct Metadata<'a> {
 struct MetadataOpf<'a> {
     book: &'a Book,
     metadata: &'a Metadata<'a>,
-    now: DateTime<Utc>,
 }
 
 impl<'a> MetadataOpf<'a> {
-    pub fn new(book: &'a Book, metadata: &'a Metadata, now: DateTime<Utc>) -> Self {
-        Self {
-            book,
-            metadata,
-            now,
-        }
+    pub fn new(book: &'a Book, metadata: &'a Metadata) -> Self {
+        Self { book, metadata }
     }
 
     pub fn format(&self) -> Result<String, ()> {
@@ -583,6 +598,7 @@ impl<'a> MetadataOpf<'a> {
             self.get_authors_string(self.metadata.author_list, &book_custom_author_sort);
         let publisher_string = self.get_publisher_string(self.metadata.publisher);
         let identifiers_string = self.get_identifiers_string(self.metadata.identifiers);
+        let pubdate_string = self.get_pubdate_string(self.book.pubdate.as_ref());
         let language_string = self.get_language_string(self.metadata.language);
         let tags_string = self.get_tags_string(self.metadata.tags);
         let link_map_string = self.get_link_map_string(self.metadata.author_list);
@@ -593,11 +609,11 @@ impl<'a> MetadataOpf<'a> {
             &authors_string,
             &publisher_string,
             &identifiers_string,
+            &pubdate_string,
             &language_string,
             &tags_string,
             &link_map_string,
             &rating_string,
-            &self.now,
         ))
     }
 
@@ -646,6 +662,13 @@ impl<'a> MetadataOpf<'a> {
             .join("&amp;");
 
         format!("<dc:publisher>{}</dc:publisher>", combined_publishers)
+    }
+
+    fn get_pubdate_string(&self, pubdate: Option<&DateTime<Utc>>) -> String {
+        match pubdate {
+            Some(date) => format!("<dc:date>{}</dc:date>", date.to_rfc3339()),
+            None => "<dc:date>0101-01-01T00:00:00+00:00</dc:date>".to_string(),
+        }
     }
 
     fn get_identifiers_string(&self, identifiers: &[Identifier]) -> String {
@@ -727,11 +750,11 @@ impl<'a> MetadataOpf<'a> {
         authors_string: &String,
         publisher_string: &String,
         identifiers_string: &String,
+        pub_date_string: &String,
         language_string: &String,
         tags_string: &String,
         link_map_string: &String,
         rating_string: &String,
-        now: &DateTime<Utc>,
     ) -> String {
         let raw_xml = format!(
             r#"<?xml version='1.0' encoding='utf-8'?>
@@ -744,7 +767,7 @@ impl<'a> MetadataOpf<'a> {
         {publisher}
         {identifiers}
         <dc:contributor opf:file-as="calibre" opf:role="bkp">citadel (1.0.0) [https://github.com/every-day-things/citadel]</dc:contributor>
-        <dc:date>{pub_date}</dc:date>
+        {pub_date}
         {language_iso_639_3}
 {tags}
         {link_map}
@@ -762,16 +785,12 @@ impl<'a> MetadataOpf<'a> {
             authors = authors_string,
             publisher = publisher_string,
             identifiers = identifiers_string,
-            pub_date = book
-                .pubdate
-                .unwrap_or(DateTime::from_timestamp_millis(0).unwrap().naive_utc())
-                .to_string()
-                .as_str(),
+            pub_date = pub_date_string,
             language_iso_639_3 = language_string,
             tags = tags_string,
             link_map = link_map_string,
             rating = rating_string,
-            now = now.to_string(),
+            now = book.timestamp.unwrap().format("%Y-%m-%dT%H:%M:%S.%6f%:z"),
             book_title_sortable = &book.sort.clone().unwrap_or("".to_string()).as_str()
         );
         raw_xml

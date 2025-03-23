@@ -27,8 +27,8 @@ diesel::table! {
         id -> Integer,
         title -> Text,
         sort -> Nullable<Text>,
-        timestamp -> Nullable<Timestamp>,
-        pubdate -> Nullable<Timestamp>,
+        timestamp -> Nullable<TimestamptzSqlite>,
+        pubdate -> Nullable<TimestamptzSqlite>,
         series_index -> Float,
         author_sort -> Nullable<Text>,
         isbn -> Nullable<Text>,
@@ -37,7 +37,7 @@ diesel::table! {
         flags -> Integer,
         uuid -> Nullable<Text>,
         has_cover -> Nullable<Bool>,
-        last_modified -> Timestamp,
+        last_modified -> TimestamptzSqlite,
     }
 }
 
