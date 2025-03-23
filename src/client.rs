@@ -108,17 +108,11 @@ impl CalibreClient {
                 .link_author_to_book(book_id, author.id);
         }
 
-        // 2. Create directories for author & book
+        // 2. Create directory for book (removed author directory nesting)
         // ======================================
         let primary_author = &author_list[0].clone();
-        let author_dir_name = self.client_v2.authors().name_author_dir(primary_author);
-
         let book_dir_name = gen_book_folder_name(book_id);
-        let book_dir_relative_path = Path::new(&author_dir_name).join(&book_dir_name);
-        library_relative_mkdir(
-            &self.validated_library_path,
-            Path::new(&author_dir_name).to_path_buf(),
-        )?;
+        let book_dir_relative_path = Path::new(&book_dir_name).to_path_buf();
         library_relative_mkdir(&self.validated_library_path, book_dir_relative_path.clone())?;
         // Update Book with relative path to book folder
         let _ = self
