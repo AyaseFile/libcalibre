@@ -113,7 +113,7 @@ impl CalibreClient {
         let primary_author = &author_list[0].clone();
         let author_dir_name = self.client_v2.authors().name_author_dir(primary_author);
 
-        let book_dir_name = gen_book_folder_name(&dto.book.title, book_id);
+        let book_dir_name = gen_book_folder_name(book_id);
         let book_dir_relative_path = Path::new(&author_dir_name).join(&book_dir_name);
         library_relative_mkdir(
             &self.validated_library_path,
@@ -559,12 +559,8 @@ fn gen_book_file_name(book_title: &String, author_name: &String) -> String {
     ))
 }
 
-fn gen_book_folder_name(book_name: &String, book_id: i32) -> String {
-    sanitise(&deunicode(
-        &"{title} ({id})"
-            .replace("{title}", book_name)
-            .replace("{id}", &book_id.to_string()),
-    ))
+fn gen_book_folder_name(book_id: i32) -> String {
+    book_id.to_string()
 }
 
 #[derive(Default)]
@@ -766,7 +762,7 @@ impl<'a> MetadataOpf<'a> {
         {authors}
         {publisher}
         {identifiers}
-        <dc:contributor opf:file-as="calibre" opf:role="bkp">citadel (1.0.0) [https://github.com/every-day-things/citadel]</dc:contributor>
+        <dc:contributor opf:file-as="calibre" opf:role="bkp">EhArchive (0.1.0) [https://github.com/AyaseFile/EhArchive]</dc:contributor>
         {pub_date}
         {language_iso_639_3}
 {tags}
