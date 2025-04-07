@@ -88,4 +88,97 @@ impl AuthorsHandler {
     pub fn name_author_dir(&mut self, author: &Author) -> String {
         author.name.clone()
     }
+
+    pub fn replace_with_translation(
+        &mut self,
+        author_id: i32,
+        translation: &str,
+    ) -> Result<(), ()> {
+        let translated_author = self.find_by_name(translation)?;
+
+        if translated_author.is_none() {
+            self.update_author_name(author_id, translation)?;
+        } else {
+            let translated_author = translated_author.unwrap();
+            self.transfer_author_links_and_delete(author_id, translated_author.id)?;
+        }
+        Ok(())
+    }
+
+    fn update_author_name(&mut self, author_id: i32, new_name: &str) -> Result<(), ()> {
+        use crate::schema::authors::dsl::{authors, id, name};
+        let mut connection = self.client.lock().unwrap();
+
+        diesel::update(authors.filter(id.eq(author_id)))
+            .set(name.eq(new_name))
+            .execute(&mut *connection)
+            .or(Err(()))?;
+
+        Ok(())
+    }
+
+    fn transfer_author_links_and_delete(
+        &mut self,
+        from_author_id: i32,
+        to_author_id: i32,
+    ) -> Result<(), ()> {
+        use crate::schema::authors::dsl::authors;
+        use crate::schema::books_authors_link::dsl::{author, book, books_authors_link, id};
+
+        let mut connection = self.client.lock().unwrap();
+
+        connection
+            .transaction::<_, diesel::result::Error, _>(|conn| {
+                let book_ids = books_authors_link
+                    .filter(author.eq(from_author_id))
+                    .select(book)
+                    .load::<i32>(conn)
+                    .map_err(|_| diesel::result::Error::RollbackTransaction)?;
+
+                for book_id in book_ids {
+                    let already_linked = books_authors_link
+                        .filter(book.eq(book_id).and(author.eq(to_author_id)))
+                        .select(id)
+                        .first::<i32>(conn)
+                        .optional()
+                        .map_err(|_| diesel::result::Error::RollbackTransaction)?
+                        .is_some();
+
+                    if already_linked {
+                        diesel::delete(
+                            books_authors_link
+                                .filter(author.eq(from_author_id).and(book.eq(book_id))),
+                        )
+                        .execute(conn)
+                        .map_err(|_| diesel::result::Error::RollbackTransaction)?;
+                    } else {
+                        diesel::update(
+                            books_authors_link
+                                .filter(author.eq(from_author_id).and(book.eq(book_id))),
+                        )
+                        .set(author.eq(to_author_id))
+                        .execute(conn)
+                        .map_err(|_| diesel::result::Error::RollbackTransaction)?;
+                    }
+                }
+
+                diesel::delete(authors.find(from_author_id))
+                    .execute(conn)
+                    .map_err(|_| diesel::result::Error::RollbackTransaction)?;
+
+                Ok(())
+            })
+            .or(Err(()))
+    }
+
+    pub fn get_all_authors(&mut self) -> Result<Vec<Author>, ()> {
+        use crate::schema::authors::dsl::{authors, id};
+        let mut connection = self.client.lock().unwrap();
+
+        authors
+            .select(Author::as_select())
+            .order(id.asc())
+            .get_results::<Author>(&mut *connection)
+            .or(Err(()))
+    }
 }

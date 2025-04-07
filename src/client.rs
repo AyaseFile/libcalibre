@@ -407,6 +407,22 @@ impl CalibreClient {
         Ok(x)
     }
 
+    pub fn get_all_authors(&mut self) -> Result<Vec<Author>, Box<dyn Error>> {
+        Ok(self.client_v2.authors().get_all_authors().unwrap())
+    }
+
+    pub fn replace_author_with_translation(
+        &mut self,
+        author_id: i32,
+        translation: &str,
+    ) -> Result<(), Box<dyn Error>> {
+        self.client_v2
+            .authors()
+            .replace_with_translation(author_id, translation)
+            .unwrap();
+        Ok(())
+    }
+
     fn add_book_files(
         &mut self,
         files: &Vec<NewLibraryFileDto>,
@@ -492,6 +508,22 @@ impl CalibreClient {
         Ok(x)
     }
 
+    pub fn get_all_publishers(&mut self) -> Result<Vec<Publisher>, Box<dyn Error>> {
+        Ok(self.client_v2.publishers().get_all_publishers().unwrap())
+    }
+
+    pub fn replace_publisher_with_translation(
+        &mut self,
+        publisher_id: i32,
+        translation: &str,
+    ) -> Result<(), Box<dyn Error>> {
+        self.client_v2
+            .publishers()
+            .replace_with_translation(publisher_id, translation)
+            .unwrap();
+        Ok(())
+    }
+
     // === Languages ===
 
     fn create_language(&mut self, dto: NewLanguageDto) -> Result<Language, Box<dyn Error>> {
@@ -513,7 +545,7 @@ impl CalibreClient {
         Ok(self.client_v2.tags().get_all_tags().unwrap())
     }
 
-    pub fn replace_with_translation(
+    pub fn replace_tag_with_translation(
         &mut self,
         tag_id: i32,
         translation: &str,
