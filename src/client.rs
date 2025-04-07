@@ -509,6 +509,22 @@ impl CalibreClient {
         Ok(x)
     }
 
+    pub fn get_all_tags(&mut self) -> Result<Vec<Tag>, Box<dyn Error>> {
+        Ok(self.client_v2.tags().get_all_tags().unwrap())
+    }
+
+    pub fn replace_with_translation(
+        &mut self,
+        tag_id: i32,
+        translation: &str,
+    ) -> Result<(), Box<dyn Error>> {
+        self.client_v2
+            .tags()
+            .replace_with_translation(tag_id, translation)
+            .unwrap();
+        Ok(())
+    }
+
     // === Ratings ===
 
     fn create_rating(&mut self, rating: NewRatingDto) -> Result<Rating, Box<dyn Error>> {
