@@ -53,14 +53,11 @@ impl PublishersHandler {
         translation: &str,
     ) -> Result<(), ()> {
         let translated_publisher = self.find_by_name(translation)?;
-
-        if translated_publisher.is_none() {
-            self.update_publisher_name(publisher_id, translation)?;
-        } else {
-            let translated_publisher = translated_publisher.unwrap();
-            self.transfer_publisher_links_and_delete(publisher_id, translated_publisher.id)?;
+        match translated_publisher {
+            Some(publisher) if publisher.id == publisher_id => Ok(()),
+            Some(publisher) => self.transfer_publisher_links_and_delete(publisher_id, publisher.id),
+            None => self.update_publisher_name(publisher_id, translation),
         }
-        Ok(())
     }
 
     fn update_publisher_name(&mut self, publisher_id: i32, new_name: &str) -> Result<(), ()> {

@@ -48,14 +48,11 @@ impl TagsHandler {
 
     pub fn replace_with_translation(&mut self, tag_id: i32, translation: &str) -> Result<(), ()> {
         let translated_tag = self.find_by_name(translation)?;
-
-        if translated_tag.is_none() {
-            self.update_tag_name(tag_id, translation)?;
-        } else {
-            let translated_tag = translated_tag.unwrap();
-            self.transfer_tag_links_and_delete(tag_id, translated_tag.id)?;
+        match translated_tag {
+            Some(tag) if tag.id == tag_id => Ok(()),
+            Some(tag) => self.transfer_tag_links_and_delete(tag_id, tag.id),
+            None => self.update_tag_name(tag_id, translation),
         }
-        Ok(())
     }
 
     fn update_tag_name(&mut self, tag_id: i32, new_name: &str) -> Result<(), ()> {

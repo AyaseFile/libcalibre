@@ -95,14 +95,11 @@ impl AuthorsHandler {
         translation: &str,
     ) -> Result<(), ()> {
         let translated_author = self.find_by_name(translation)?;
-
-        if translated_author.is_none() {
-            self.update_author_name(author_id, translation)?;
-        } else {
-            let translated_author = translated_author.unwrap();
-            self.transfer_author_links_and_delete(author_id, translated_author.id)?;
+        match translated_author {
+            Some(author) if author.id == author_id => Ok(()),
+            Some(author) => self.transfer_author_links_and_delete(author_id, author.id),
+            None => self.update_author_name(author_id, translation),
         }
-        Ok(())
     }
 
     fn update_author_name(&mut self, author_id: i32, new_name: &str) -> Result<(), ()> {
