@@ -1,39 +1,23 @@
-use crate::cover_image::cover_image_data_from_path;
+pub mod add_book;
+pub mod update_book;
+pub mod utils;
+
+pub use utils::*;
+
 use crate::dtos::author::UpdateAuthorDto;
-use crate::dtos::file::NewFileDto;
-use crate::dtos::language::NewLanguageDto;
-use crate::dtos::library::NewLibraryEntryDto;
-use crate::dtos::library::NewLibraryFileDto;
-use crate::dtos::library::UpdateLibraryEntryDto;
-use crate::dtos::publisher::NewPublisherDto;
-use crate::dtos::rating::NewRatingDto;
-use crate::dtos::tag::NewTagDto;
-use crate::entities::book_file::NewBookFile;
 use crate::entities::language::Language;
 use crate::entities::rating::Rating;
 use crate::entities::tag::Tag;
-use crate::util::canonicalize_lang;
 use crate::Book;
 use crate::Publisher;
 use crate::UpsertBookIdentifier;
 use chrono::DateTime;
 use chrono::Utc;
-use deunicode::deunicode;
-use sanitise_file_name::sanitise;
-
-use crate::BookFile;
 
 use std::error::Error;
-use std::fs;
-use std::io;
-use std::path::Path;
-use std::path::PathBuf;
 
 use diesel::RunQueryDsl;
 
-use crate::dtos::author::NewAuthorDto;
-
-use crate::entities::book::{NewBook, UpdateBookData};
 use crate::models::Identifier;
 use crate::persistence::establish_connection;
 use crate::util::ValidDbPath;
@@ -55,8 +39,8 @@ impl std::fmt::Display for CalibreError {
 impl std::error::Error for CalibreError {}
 
 pub struct CalibreClient {
-    validated_library_path: ValidDbPath,
-    client_v2: ClientV2,
+    pub validated_library_path: ValidDbPath,
+    pub client_v2: ClientV2,
 }
 
 impl CalibreClient {
@@ -65,246 +49,6 @@ impl CalibreClient {
             validated_library_path: db_path.clone(),
             client_v2: ClientV2::new(db_path),
         }
-    }
-
-    pub fn add_book(
-        &mut self,
-        dto: NewLibraryEntryDto,
-    ) -> Result<crate::BookWithAuthorsAndFiles, Box<dyn std::error::Error>> {
-        // 1. Create Authors & Book, then link them.
-        // ======================================
-        let authors = dto
-            .authors
-            .into_iter()
-            .map(|mut author| {
-                if author.sortable_name.is_empty() {
-                    author.sortable_name = Author::sort_author_name_apa(&author.full_name);
-                }
-                author
-            })
-            .collect::<Vec<NewAuthorDto>>();
-        let author_list = self.create_authors(authors)?;
-        let creatable_book = NewBook::try_from(dto.book.clone()).unwrap();
-        let book_id = self.client_v2.books().create(creatable_book).unwrap().id;
-        let timestamp = Utc::now();
-        let _ = self.client_v2.books().update(
-            book_id,
-            UpdateBookData {
-                author_sort: Some(combined_author_sort(&author_list)),
-                title: None,
-                timestamp: Some(timestamp),
-                pubdate: Some(default_pubdate()),
-                series_index: None,
-                path: None,
-                flags: None,
-                has_cover: None,
-                last_modified: None,
-            },
-        );
-        for author in &author_list {
-            let _ = self
-                .client_v2
-                .books()
-                .link_author_to_book(book_id, author.id);
-        }
-
-        // 2. Create directory for book (removed author directory nesting)
-        // ======================================
-        let primary_author = &author_list[0].clone();
-        let book_dir_name = gen_book_folder_name(book_id);
-        let book_dir_relative_path = Path::new(&book_dir_name).to_path_buf();
-        library_relative_mkdir(&self.validated_library_path, book_dir_relative_path.clone())?;
-        // Update Book with relative path to book folder
-        let _ = self
-            .client_v2
-            .books()
-            .update(book_id, update_book_data_for_path(&book_dir_relative_path));
-
-        // 3. Create metadata, then link them.
-        // ======================================
-        let publishers = self.create_publishers(dto.publishers)?;
-        for publisher in publishers.iter() {
-            let _ = self
-                .client_v2
-                .books()
-                .link_publisher_to_book(book_id, publisher.id);
-        }
-
-        let identifiers = dto
-            .identifiers
-            .into_iter()
-            .map(|i| UpsertBookIdentifier {
-                book_id,
-                id: i.id,
-                label: i.label,
-                value: i.value,
-            })
-            .collect::<Vec<UpsertBookIdentifier>>();
-        let identifiers = self.upsert_book_identifiers(identifiers)?;
-
-        let language = if let Some(language_input) = dto.language {
-            if let Some(canonical_lang) = canonicalize_lang(&language_input.lang_code) {
-                let language = self.create_language(NewLanguageDto {
-                    lang_code: canonical_lang.to_639_3().to_string(),
-                })?;
-
-                let _ = self
-                    .client_v2
-                    .books()
-                    .link_language_to_book(book_id, language.id);
-
-                Some(language)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let tags = self.create_tags(dto.tags)?;
-        for tag in tags.iter() {
-            let _ = self.client_v2.books().link_tag_to_book(book_id, tag.id);
-        }
-
-        let rating = if let Some(rating) = dto.rating {
-            let rating = self.create_rating(rating)?;
-            let _ = self
-                .client_v2
-                .books()
-                .link_rating_to_book(book_id, rating.id);
-            Some(rating)
-        } else {
-            None
-        };
-
-        let metadata = Metadata {
-            author_list: &author_list,
-            publisher: &publishers,
-            identifiers: &identifiers,
-            language: language.as_ref(),
-            tags: &tags,
-            rating: rating.as_ref(),
-        };
-
-        // 4. Copy Book files & cover image to library
-        // ===========================
-        let mut created_files: Vec<BookFile> = Vec::new();
-        if let Some(files) = dto.files {
-            // Copy files to library
-            let result = self.add_book_files(
-                &files,
-                &dto.book.title,
-                book_id,
-                &primary_author.name,
-                book_dir_relative_path.clone(),
-            );
-            if let Ok(files) = result {
-                created_files = files;
-            }
-
-            let primary_file = &files[0];
-            {
-                let cover_data = cover_image_data_from_path(primary_file.path.as_path())?;
-                if let Some(cover_data) = cover_data {
-                    let cover_path = Path::new(&book_dir_relative_path).join("cover.jpg");
-                    if library_relative_write_file(
-                        &self.validated_library_path,
-                        &cover_path,
-                        &cover_data,
-                    )
-                    .is_ok()
-                    {
-                        let update = UpdateBookData {
-                            has_cover: Some(true),
-                            ..Default::default()
-                        };
-                        let _ = self.client_v2.books().update(book_id, update);
-                    }
-                }
-            }
-        }
-
-        let book = self
-            .client_v2
-            .books()
-            .update(
-                book_id,
-                UpdateBookData {
-                    last_modified: Some(Utc::now()),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-
-        // 5. Create Calibre metadata file
-        // ===============================
-        let metadata_opf = MetadataOpf::new(&book, &metadata).format();
-        match metadata_opf {
-            Ok(contents) => {
-                let metadata_opf_path = Path::new(&book_dir_relative_path).join("metadata.opf");
-                let _ = library_relative_write_file(
-                    &self.validated_library_path,
-                    &metadata_opf_path,
-                    contents.as_bytes(),
-                );
-            }
-            Err(_) => (),
-        };
-
-        Ok(BookWithAuthorsAndFiles {
-            book,
-            authors: author_list,
-            files: created_files,
-            book_description_html: None,
-            is_read: false,
-        })
-    }
-
-    pub fn update_book(
-        &mut self,
-        book_id: i32,
-        updates: UpdateLibraryEntryDto,
-    ) -> Result<crate::BookWithAuthorsAndFiles, Box<dyn std::error::Error>> {
-        // Write new updates to book
-        let is_read = updates.book.is_read;
-        let book_update = UpdateBookData::try_from(updates.book).unwrap();
-        let _book = self.client_v2.books().update(book_id, book_update);
-
-        if is_read.is_some() {
-            let _set_book_result = self
-                .client_v2
-                .books()
-                .set_book_read_state(book_id, is_read.unwrap());
-        }
-
-        match updates.author_id_list {
-            Some(author_id_list) => {
-                // Unlink existing authors
-                let existing_authors = self
-                    .client_v2
-                    .books()
-                    .find_author_ids_by_book_id(book_id)
-                    .unwrap();
-                existing_authors.iter().for_each(|&author_id| {
-                    let _ = self
-                        .client_v2
-                        .books()
-                        .unlink_author_from_book(book_id, author_id);
-                });
-
-                // Link requested authors to book
-                author_id_list.iter().for_each(|author_id| {
-                    let author_id_int = author_id.parse::<i32>().unwrap();
-                    let _ = self
-                        .client_v2
-                        .books()
-                        .link_author_to_book(book_id, author_id_int);
-                });
-            }
-            None => {}
-        }
-
-        self.find_book_with_authors(book_id)
     }
 
     pub fn find_book_with_authors(
@@ -395,18 +139,6 @@ impl CalibreClient {
         self.client_v2.authors().update(author_id, updates)
     }
 
-    fn create_authors(
-        &mut self,
-        authors: Vec<NewAuthorDto>,
-    ) -> Result<Vec<Author>, Box<dyn Error>> {
-        let x = authors
-            .into_iter()
-            .map(|dto| self.client_v2.authors().create_if_missing(dto).unwrap())
-            .collect::<Vec<Author>>();
-
-        Ok(x)
-    }
-
     pub fn get_all_authors(&mut self) -> Result<Vec<Author>, Box<dyn Error>> {
         Ok(self.client_v2.authors().get_all_authors().unwrap())
     }
@@ -421,43 +153,6 @@ impl CalibreClient {
             .replace_with_translation(author_id, translation)
             .unwrap();
         Ok(())
-    }
-
-    fn add_book_files(
-        &mut self,
-        files: &Vec<NewLibraryFileDto>,
-        book_title: &String,
-        book_id: i32,
-        primary_author_name: &String,
-        book_dir_rel_path: PathBuf,
-    ) -> Result<Vec<BookFile>, ClientError> {
-        let book_files = self.client_v2.book_files();
-
-        files
-            .iter()
-            .map(|file| {
-                let book_file_name = gen_book_file_name(book_title, primary_author_name);
-                let nbf = NewBookFile::try_from(NewFileDto {
-                    path: file.path.clone(),
-                    book_id,
-                    name: book_file_name,
-                })
-                .unwrap();
-                let added_book = book_files
-                    .create(nbf)
-                    .map_err(|_| ClientError::GenericError)?;
-
-                let book_rel_path = Path::new(&book_dir_rel_path).join(&added_book.as_filename());
-                let _ = library_relative_copy_file(
-                    &self.validated_library_path,
-                    file.path.as_path(),
-                    book_rel_path.as_path(),
-                )
-                .map_err(|_| ClientError::GenericError);
-
-                Ok(added_book)
-            })
-            .collect::<Result<Vec<BookFile>, ClientError>>()
     }
 
     // === Identifiers ===
@@ -494,20 +189,6 @@ impl CalibreClient {
         .map_err(|_| CalibreError::DatabaseError)
     }
 
-    // === Publishers ===
-
-    fn create_publishers(
-        &mut self,
-        dto: Vec<NewPublisherDto>,
-    ) -> Result<Vec<Publisher>, Box<dyn Error>> {
-        let x = dto
-            .into_iter()
-            .map(|dto| self.client_v2.publishers().create_if_missing(dto).unwrap())
-            .collect::<Vec<Publisher>>();
-
-        Ok(x)
-    }
-
     pub fn get_all_publishers(&mut self) -> Result<Vec<Publisher>, Box<dyn Error>> {
         Ok(self.client_v2.publishers().get_all_publishers().unwrap())
     }
@@ -522,23 +203,6 @@ impl CalibreClient {
             .replace_with_translation(publisher_id, translation)
             .unwrap();
         Ok(())
-    }
-
-    // === Languages ===
-
-    fn create_language(&mut self, dto: NewLanguageDto) -> Result<Language, Box<dyn Error>> {
-        Ok(self.client_v2.languages().create_if_missing(dto).unwrap())
-    }
-
-    // === Tags ===
-
-    fn create_tags(&mut self, tags: Vec<NewTagDto>) -> Result<Vec<Tag>, Box<dyn Error>> {
-        let x = tags
-            .into_iter()
-            .map(|dto| self.client_v2.tags().create_if_missing(dto).unwrap())
-            .collect::<Vec<Tag>>();
-
-        Ok(x)
     }
 
     pub fn get_all_tags(&mut self) -> Result<Vec<Tag>, Box<dyn Error>> {
@@ -556,53 +220,6 @@ impl CalibreClient {
             .unwrap();
         Ok(())
     }
-
-    // === Ratings ===
-
-    fn create_rating(&mut self, rating: NewRatingDto) -> Result<Rating, Box<dyn Error>> {
-        Ok(self.client_v2.ratings().create_if_missing(rating).unwrap())
-    }
-}
-
-fn combined_author_sort(author_list: &Vec<Author>) -> String {
-    author_list
-        .iter()
-        .map(|author| author.sortable_name())
-        .collect::<Vec<String>>()
-        .join(" & ")
-}
-
-fn default_pubdate() -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339("0101-01-01T00:00:00+00:00")
-        .unwrap()
-        .with_timezone(&Utc)
-}
-
-fn update_book_data_for_path(path: &PathBuf) -> UpdateBookData {
-    let path_as_string = path.to_str().unwrap().to_string();
-    UpdateBookData {
-        author_sort: None,
-        title: None,
-        timestamp: None,
-        pubdate: None,
-        series_index: None,
-        path: Some(path_as_string),
-        flags: None,
-        has_cover: None,
-        last_modified: None,
-    }
-}
-
-fn gen_book_file_name(book_title: &String, author_name: &String) -> String {
-    sanitise(&deunicode(
-        &"{title} - {author}"
-            .replace("{title}", book_title)
-            .replace("{author}", author_name),
-    ))
-}
-
-fn gen_book_folder_name(book_id: i32) -> String {
-    book_id.to_string()
 }
 
 #[derive(Default)]
@@ -853,44 +470,3 @@ impl std::fmt::Display for ClientError {
     }
 }
 impl std::error::Error for ClientError {}
-
-/// Create a new directory at a library-relative path.
-/// Convenience function to avoid having absolute paths for files everywhere.
-fn library_relative_mkdir(valid_db_path: &ValidDbPath, rel_path: PathBuf) -> io::Result<()> {
-    let complete_path = Path::new(&valid_db_path.library_path).join(rel_path);
-
-    match complete_path.exists() {
-        true => Ok(()),
-        _ => fs::create_dir_all(complete_path),
-    }
-}
-
-/// Copy a file from an absolute path to a library-relative path, using a ValidDbPath.
-/// Convenience function to avoid having to create the abs. path yourself.
-fn library_relative_copy_file(
-    valid_db_path: &ValidDbPath,
-    source_abs: &Path,
-    dest_rel: &Path,
-) -> io::Result<()> {
-    match source_abs.exists() {
-        true => {
-            let complete_dest_path = Path::new(&valid_db_path.library_path).join(dest_rel);
-            fs::copy(source_abs, complete_dest_path).map(|_| ())
-        }
-        false => Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("Source file does not exist: {:?}", source_abs),
-        )),
-    }
-}
-
-/// Write `contents` to a library-relative file path.
-/// Convenience function to avoid having to create the absolute path.
-fn library_relative_write_file(
-    valid_db_path: &ValidDbPath,
-    rel_path: &Path,
-    contents: &[u8],
-) -> io::Result<()> {
-    let complete_path = Path::new(&valid_db_path.library_path).join(rel_path);
-    fs::write(complete_path, contents)
-}
