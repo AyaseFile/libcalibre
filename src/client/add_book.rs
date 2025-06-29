@@ -26,13 +26,9 @@ use crate::dtos::author::NewAuthorDto;
 use crate::client::*;
 use crate::entities::book::{NewBook, UpdateBookData};
 use crate::Author;
-use crate::BookWithAuthorsAndFiles;
 
 impl CalibreClient {
-    pub fn add_book(
-        &mut self,
-        dto: NewLibraryEntryDto,
-    ) -> Result<crate::BookWithAuthorsAndFiles, Box<dyn std::error::Error>> {
+    pub fn add_book(&mut self, dto: NewLibraryEntryDto) -> Result<(), Box<dyn std::error::Error>> {
         // 1. Create Authors & Book, then link them.
         // ======================================
         let authors = dto
@@ -213,13 +209,7 @@ impl CalibreClient {
             Err(_) => (),
         };
 
-        Ok(BookWithAuthorsAndFiles {
-            book,
-            authors: author_list,
-            files: created_files,
-            book_description_html: None,
-            is_read: false,
-        })
+        Ok(())
     }
 
     fn create_authors(
