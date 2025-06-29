@@ -176,6 +176,16 @@ impl CalibreClient {
             .delete_book_identifier(book_id, identifier_id)
     }
 
+    pub fn find_book_id_by_identifier(
+        &mut self,
+        i_type: &str,
+        i_value: &str,
+    ) -> Result<Option<i32>, String> {
+        self.client_v2
+            .books()
+            .find_book_id_by_identifier(i_type, i_value)
+    }
+
     /// Updates the library's ID to a new UUID.
     ///
     /// You probably do not need this method, unless you're creating a new

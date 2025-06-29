@@ -236,5 +236,7 @@ diesel::table! {
 
 diesel::joinable!(books_authors_link -> books (book));
 diesel::joinable!(books_authors_link -> authors (author));
+diesel::joinable!(identifiers -> books (book));
 
 diesel::allow_tables_to_appear_in_same_query!(books_authors_link, books, authors);
+diesel::allow_tables_to_appear_in_same_query!(books, identifiers);

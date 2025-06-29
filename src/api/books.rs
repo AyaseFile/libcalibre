@@ -431,6 +431,30 @@ impl BooksHandler {
             .or(Err(()))
     }
 
+    pub fn find_book_id_by_identifier(
+        &self,
+        i_type: &str,
+        i_value: &str,
+    ) -> Result<Option<i32>, String> {
+        use crate::schema::identifiers::dsl::{book, identifiers, type_, val};
+        let mut connection = self.client.lock().unwrap();
+
+        let results: Vec<i32> = identifiers
+            .filter(type_.eq(i_type))
+            .filter(val.eq(i_value))
+            .select(book)
+            .load(&mut *connection)
+            .map_err(|e| format!("Database query failed: {e}"))?;
+
+        match results.len() {
+            0 => Ok(None),
+            1 => Ok(Some(results[0])),
+            _ => Err(format!(
+                "Multiple books found for identifier {i_type}:{i_value}"
+            )),
+        }
+    }
+
     pub fn find_rating_ids_by_book_id(&mut self, book_id: i32) -> Result<Vec<i32>, ()> {
         use crate::schema::books_ratings_link::dsl::*;
         let mut connection = self.client.lock().unwrap();
