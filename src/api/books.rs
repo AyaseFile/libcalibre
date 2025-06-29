@@ -386,6 +386,61 @@ impl BooksHandler {
             .map(|_| ())
             .or(Err(()))
     }
+
+    pub fn find_publisher_ids_by_book_id(&mut self, book_id: i32) -> Result<Vec<i32>, ()> {
+        use crate::schema::books_publishers_link::dsl::*;
+        let mut connection = self.client.lock().unwrap();
+
+        books_publishers_link
+            .filter(book.eq(book_id))
+            .select(publisher)
+            .load::<i32>(&mut *connection)
+            .or(Err(()))
+    }
+
+    pub fn find_language_ids_by_book_id(&mut self, book_id: i32) -> Result<Vec<i32>, ()> {
+        use crate::schema::books_languages_link::dsl::*;
+        let mut connection = self.client.lock().unwrap();
+
+        books_languages_link
+            .filter(book.eq(book_id))
+            .select(lang_code)
+            .load::<i32>(&mut *connection)
+            .or(Err(()))
+    }
+
+    pub fn find_identifier_ids_by_book_id(&mut self, book_id: i32) -> Result<Vec<i32>, ()> {
+        use crate::schema::identifiers::dsl::*;
+        let mut connection = self.client.lock().unwrap();
+
+        identifiers
+            .filter(book.eq(book_id))
+            .select(id)
+            .load::<i32>(&mut *connection)
+            .or(Err(()))
+    }
+
+    pub fn find_tag_ids_by_book_id(&mut self, book_id: i32) -> Result<Vec<i32>, ()> {
+        use crate::schema::books_tags_link::dsl::*;
+        let mut connection = self.client.lock().unwrap();
+
+        books_tags_link
+            .filter(book.eq(book_id))
+            .select(tag)
+            .load::<i32>(&mut *connection)
+            .or(Err(()))
+    }
+
+    pub fn find_rating_ids_by_book_id(&mut self, book_id: i32) -> Result<Vec<i32>, ()> {
+        use crate::schema::books_ratings_link::dsl::*;
+        let mut connection = self.client.lock().unwrap();
+
+        books_ratings_link
+            .filter(book.eq(book_id))
+            .select(rating)
+            .load::<i32>(&mut *connection)
+            .or(Err(()))
+    }
 }
 
 fn uuid_for_book(conn: &mut SqliteConnection, book_id: i32) -> Option<String> {

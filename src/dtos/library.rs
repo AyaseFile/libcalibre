@@ -31,3 +31,13 @@ pub struct NewLibraryEntryDto {
     pub rating: Option<NewRatingDto>,
     pub files: Option<Vec<NewLibraryFileDto>>,
 }
+
+pub struct ReplaceLibraryEntryDto {
+    pub book: NewBookDto,
+    pub authors: Vec<NewAuthorDto>,
+    pub publishers: Vec<NewPublisherDto>,
+    pub identifiers: Vec<UpsertBookIdentifier>,
+    pub language: Option<NewLanguageDto>,
+    pub tags: Vec<NewTagDto>,
+    pub rating: Option<NewRatingDto>,
+}

@@ -1,4 +1,5 @@
 pub mod add_book;
+pub mod replace_book;
 pub mod update_book;
 pub mod utils;
 
