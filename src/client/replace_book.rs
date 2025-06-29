@@ -42,7 +42,7 @@ impl CalibreClient {
             .identifiers
             .into_iter()
             .map(|e| Identifier {
-                id: e.id.unwrap(),
+                id: 0, // may not need this
                 book: book_id,
                 type_: e.label,
                 val: e.value,
