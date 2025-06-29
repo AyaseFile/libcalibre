@@ -146,19 +146,15 @@ impl CalibreClient {
 
         // 4. Copy Book files & cover image to library
         // ===========================
-        let mut created_files: Vec<BookFile> = Vec::new();
         if let Some(files) = dto.files {
             // Copy files to library
-            let result = self.add_book_files(
+            let _ = self.add_book_files(
                 &files,
                 &dto.book.title,
                 book_id,
                 &primary_author.name,
                 book_dir_relative_path.clone(),
             );
-            if let Ok(files) = result {
-                created_files = files;
-            }
 
             let primary_file = &files[0];
             {
